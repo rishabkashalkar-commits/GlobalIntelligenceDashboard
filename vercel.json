@@ -1,10 +1,6 @@
 {
   "rewrites": [
     {
-      "source": "/api/news/:countryCode",
-      "destination": "/api/news?countryCode=:countryCode"
-    },
-    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     }
