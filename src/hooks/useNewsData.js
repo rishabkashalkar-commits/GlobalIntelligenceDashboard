@@ -12,8 +12,9 @@ export function useNewsData(countryCode, category) {
       setLoadingNews(true)
       setNewsError(null)
       try {
-        const url = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/news/${targetCountry}` +
-          `?category=${category || 'all'}`
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+        const endpoint = baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`
+        const url = `${endpoint}/news?countryCode=${targetCountry}&category=${category || 'all'}`
         const res = await window.fetch(url, { signal: controller.signal })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
