@@ -16,8 +16,10 @@ export function useNewsData(countryCode, category) {
         const endpoint = baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`
         const url = `${endpoint}/news?countryCode=${targetCountry}&category=${category || 'all'}`
         const res = await window.fetch(url, { signal: controller.signal })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
+        if (!res.ok) {
+          throw new Error(data.message || `HTTP ${res.status}`)
+        }
         setArticles(data.articles || [])
       } catch (e) {
         if (e.name !== 'AbortError') {

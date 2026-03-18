@@ -16,7 +16,7 @@ export default function MarkerTooltip({ tooltip }) {
 
   return (
     <div
-      className="pointer-events-none absolute z-50 bg-surface border border-borderMid rounded-lg px-3 py-1.5 shadow-xl min-w-[150px]"
+      className="pointer-events-none absolute z-50 bg-surface border border-borderMid rounded-lg px-3 py-2.5 shadow-xl min-w-[150px]"
       style={{ left: x + 10, top: y - 40 }}
     >
       <p className="font-display text-sm font-medium text-textPrimary">

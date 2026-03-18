@@ -2,11 +2,10 @@ import { WEBCAM_PRESETS } from './webcamPresets'
 import { REGION_MAP } from '../../lib/constants'
 import WebcamTile from './WebcamTile'
 
-export default function WebcamStrip({ country }) {
-  const region  = REGION_MAP[country] || 'europe'
-  const streams = WEBCAM_PRESETS[region] || []
+export default function WebcamStrip() {
+  const { webcamStreams } = useGlobeStore()
 
-  if (!streams.length) return null
+  if (!webcamStreams || !webcamStreams.length) return null
 
   return (
     <div className="flex-shrink-0 border-t border-borderSubtle bg-base">

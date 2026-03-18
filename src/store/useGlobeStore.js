@@ -31,6 +31,8 @@ const useGlobeStore = create((set) => ({
 
   showWebcams:    false,
   setShowWebcams: (bool) => set({ showWebcams: bool }),
+  webcamStreams:  [],
+  setWebcamStreams: (streams) => set({ webcamStreams: streams }),
 
   dateFilter:   'all',
   setDateFilter: (val) => set({ dateFilter: val }),
