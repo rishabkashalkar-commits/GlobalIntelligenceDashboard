@@ -6,7 +6,6 @@ import WebcamStrip from '../WebcamStrip/WebcamStrip'
 import { useNewsData } from '../../hooks/useNewsData'
 import { useWebcamTrigger } from '../../hooks/useWebcamTrigger'
 import { COUNTRY_FLAGS } from '../../lib/constants'
-
 function getRegionLabel(code) {
   const regions = {
     IN: 'South Asia', US: 'North America', GB: 'Europe',
@@ -19,7 +18,6 @@ function getRegionLabel(code) {
   }
   return regions[code] || 'Global'
 }
-
 const getCountryName = (code) => {
   if (!code) return '🌐 Global';
   if (code.length > 2) return code; // Already a full name
@@ -29,32 +27,25 @@ const getCountryName = (code) => {
     return code;
   }
 };
-
 const ISO_FROM_NAME = {
   'India': 'IN', 'United States': 'US', 'United Kingdom': 'GB', 'France': 'FR',
   'Germany': 'DE', 'Japan': 'JP', 'China': 'CN', 'Australia': 'AU',
   'Brazil': 'BR', 'Russia': 'RU', 'Iran': 'IR', 'Saudi Arabia': 'SA',
 }
-
 export default function NewsPanel() {
   const {
     isPanelOpen, closePanel, selectedCountry,
     activeCategory, articles, isLoadingNews, newsError, showWebcams
   } = useGlobeStore()
-
   // Resolve ISO for flags/regions
   const isoCode = ISO_FROM_NAME[selectedCountry] || (selectedCountry?.length === 2 ? selectedCountry.toUpperCase() : null)
-
-  useWebcamTrigger(articles)
-
+  useWebcamTrigger(articles, selectedCountry)
   if (!isPanelOpen) return null
-
   return (
     <div className={`fixed right-0 top-[48px] w-[380px] h-[calc(100vh-48px)]
       bg-surface border-l border-borderSubtle flex flex-col z-40
       transform transition-transform duration-300 ease-in-out
       ${isPanelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-
       {/* Country Header */}
       <div className="flex-shrink-0 px-4 py-3 border-b border-borderSubtle flex items-center gap-3">
         <span className="text-2xl">{COUNTRY_FLAGS[isoCode] || '🌐'}</span>
@@ -73,10 +64,8 @@ export default function NewsPanel() {
           ✕
         </button>
       </div>
-
       <CategoryTabs />
       <PanelFilters />
-
       {/* Article List */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
         {isLoadingNews
@@ -107,7 +96,6 @@ export default function NewsPanel() {
           </div>
         )}
       </div>
-
       {showWebcams && <WebcamStrip country={selectedCountry} />}
     </div>
   )
