@@ -46,11 +46,11 @@ const COUNTRY_ALIASES = {
 const DASHBOARD_TO_API = {
   'politics': 'politics',
   'economy': 'business',
-  'conflict': 'politics', // Better fallback than economy
-  'society': 'top',
-  'technology': 'technology',
+  'conflict': 'politics,world,top',
+  'society': 'world,politics,top,tourism,health',
+  'technology': 'technology,science',
   'sports': 'sports',
-  'environment': 'environment',
+  'environment': 'environment,science,top',
 }
 // NewsData API Categories -> Dashboard Categories
 const CATEGORY_MAP = {
@@ -225,7 +225,7 @@ function normalizeArticles(results, isGlobal, countryCode) {
       internalCat = CATEGORY_MAP[apiCat] || 'society'
     }
     // Tighter conflict keywords using word boundaries
-    const isConflict = /\b(war|warfare|military|air\s*strike|missile|bombing|shelling|insurgency|battles|combat|ceasefire|invasion|attack|strike|soldier|navy|air\s*force|troops|combatants|conflict)\b/i.test(textLower)
+    const isConflict = /\b(war|warfare|military|air\s*strike|missile|bombing|shelling|insurgency|battles|combat|ceasefire|invasion|attack|strike|soldier|navy|air\s*force|troops|combatants|conflict|intelligence\s*agency|espionage|cyberwar|sanctions|geopolitics|nuclear)\b/i.test(textLower)
     const isEconomy = /\b(market|stock\s*exchange|inflation|gdp|fiscal|monetary|central\s*bank|trade\s*deficit|interest\s*rate|revenue|profit|stocks|economy)\b/i.test(textLower)
     const isEnvironment = /\b(climate|environment|pollution|emission|renewables|storm|hurricane|cyclone|wildfire|earthquake|flood|weather)\b/i.test(textLower)
     const isTech = /\b(startup|software|ai|artificial\s*intelligence|silicon\s*valley|gadget|processor|hardware|encryption|cybersecurity|crypto|blockchain|space\s*x|nasa)\b/i.test(textLower)
