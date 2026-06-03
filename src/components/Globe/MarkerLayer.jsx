@@ -1,11 +1,10 @@
 import { CATEGORIES, CATEGORY_COLORS } from '../../lib/constants'
 import useGlobeStore from '../../store/useGlobeStore'
-
 export default function MarkerLayer(globe, articles, setTooltip) {
   const { activeLayers, setSelectedCountry, openPanel } = useGlobeStore.getState()
   const now = Date.now()
   const ONE_HOUR = 3600000
-
+  console.log(`MarkerLayer: Processing ${articles.length} articles...`)
   // 1. Group by country and category
   const countryData = {}
   
@@ -13,8 +12,7 @@ export default function MarkerLayer(globe, articles, setTooltip) {
     const lat = a.lat || getCountryLat(a.country_code)
     const lng = a.lng || getCountryLng(a.country_code)
     
-    if (lat === 0 && lng === 0) return
-
+    if (!lat && !lng) return // Safety check
     if (!countryData[a.country_code]) {
       countryData[a.country_code] = {
         lat, lng, totalEvents: 0, categories: {}
@@ -36,11 +34,9 @@ export default function MarkerLayer(globe, articles, setTooltip) {
       countryData[a.country_code].categories[cat].isBreaking = true
     }
   })
-
   // 2. Process data for native globe primitives
   const pointMarkers = []
   const ringMarkers = []
-
   Object.entries(countryData).forEach(([country_code, data]) => {
     const activeCats = Object.keys(data.categories).filter(c => activeLayers.includes(c))
     const numCats = activeCats.length
@@ -52,7 +48,6 @@ export default function MarkerLayer(globe, articles, setTooltip) {
       
       const latOffset = Math.cos(angle) * offsetMultiplier
       const lngOffset = Math.sin(angle) * offsetMultiplier
-
       const marker = {
         country_code,
         category: cat,
@@ -64,14 +59,12 @@ export default function MarkerLayer(globe, articles, setTooltip) {
         count: catData.count,
         isBreaking: catData.isBreaking
       }
-
       pointMarkers.push(marker)
       if (marker.isBreaking) {
         ringMarkers.push(marker)
       }
     })
   })
-
   // 3. Apply to Globe using Native Methods
   // Note: globe.gl methods return the instance for chaining
   globe
@@ -100,7 +93,6 @@ export default function MarkerLayer(globe, articles, setTooltip) {
         useGlobeStore.getState().openPanel()
       }
     })
-
   // Add Pulse Rings for breaking news
   globe
     .ringsData(ringMarkers)
@@ -110,10 +102,8 @@ export default function MarkerLayer(globe, articles, setTooltip) {
     .ringMaxRadius(3)
     .ringPropagationSpeed(2)
     .ringRepeatPeriod(1000)
-
   console.log(`MarkerLayer: Rendered ${pointMarkers.length} points, ${ringMarkers.length} pulse rings.`)
 }
-
 // Capital city coordinates (kept for lat/lng lookup)
 const COUNTRY_COORDS = {
   US: [38.9,  -77.0], GB: [51.5,  -0.1],  FR: [48.9,   2.3],
@@ -135,7 +125,6 @@ const COUNTRY_COORDS = {
   PT: [38.7, -9.1],   NZ: [-41.3, 174.8], SG: [1.3, 103.8],
   MY: [3.1, 101.7],   TH: [13.7, 100.5],  VN: [21.0, 105.8],
 }
-
 export function getCountryLat(code) { 
   if (!code) return 0
   return COUNTRY_COORDS[code.toUpperCase()]?.[0] ?? 0 
