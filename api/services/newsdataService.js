@@ -1,5 +1,4 @@
 import axios from 'axios'
-
 // Map of common country names returned by NewsData to ISO codes
 const COUNTRY_NAME_TO_ISO = {
   'INDIA': 'IN', 'UNITED STATES OF AMERICA': 'US', 'UNITED STATES': 'US',
@@ -18,7 +17,6 @@ const COUNTRY_NAME_TO_ISO = {
   'IRELAND': 'IE', 'NEW ZEALAND': 'NZ', 'SINGAPORE': 'SG', 'MALAYSIA': 'MY',
   'THAILAND': 'TH', 'VIETNAM': 'VN', 'PHILIPPINES': 'PH',
 }
-
 const ISO_TO_NAME = {
   'IN': 'India', 'US': 'United States', 'GB': 'United Kingdom', 'FR': 'France',
   'DE': 'Germany', 'JP': 'Japan', 'CN': 'China', 'AU': 'Australia',
@@ -31,7 +29,19 @@ const ISO_TO_NAME = {
   'NP': 'Nepal', 'IQ': 'Iraq', 'SY': 'Syria', 'YE': 'Yemen',
   'JO': 'Jordan', 'LB': 'Lebanon', 'GR': 'Greece', 'PH': 'Philippines',
 }
-
+const COUNTRY_ALIASES = {
+  'US': ['usa', 'u.s.a', 'america', 'united states'],
+  'GB': ['uk', 'u.k', 'britain', 'united kingdom', 'england', 'scotland', 'wales'],
+  'AE': ['uae', 'u.a.e', 'emirates'],
+  'KR': ['south korea', 'korea'],
+  'RU': ['russia', 'russian federation'],
+  'IR': ['iran', 'persia'],
+  'ZA': ['south africa'],
+  'CZ': ['czechia', 'czech republic'],
+  'TR': ['turkey', 'türkiye'],
+  'IN': ['india', 'bharat'],
+  'CN': ['china', 'prc'],
+}
 // Dashboard Categories -> NewsData API Categories
 const DASHBOARD_TO_API = {
   'politics': 'politics',
@@ -42,7 +52,6 @@ const DASHBOARD_TO_API = {
   'sports': 'sports',
   'environment': 'environment',
 }
-
 // NewsData API Categories -> Dashboard Categories
 const CATEGORY_MAP = {
   'politics': 'politics',
@@ -64,19 +73,19 @@ const CATEGORY_MAP = {
   'top': 'politics',
   'other': 'society'
 }
-
 async function fetchNews({ countryCode, category, page, source }) {
   const isGlobal = !countryCode || countryCode.toLowerCase() === 'all'
   
   // All categories requested? Use parallel fetching to ensure markers for every layer
   if (category === 'all' || !category) {
-    const catsToFetch = ['business', 'politics', 'technology', 'sports', 'science', 'environment', 'world']
+    const catsToFetch = ['top', 'politics', 'business', 'technology', 'sports', 'science', 'environment', 'world']
     console.log(`Marker Density: Parallel fetch for ${isGlobal ? 'Global' : countryCode} (${catsToFetch.length} categories)`)
     
     try {
+      const apiKey = process.env.NEWSDATA_API_KEY || process.env.VITE_NEWSDATA_KEY
       const requests = catsToFetch.map(cat => {
         const p = {
-          apikey: process.env.NEWSDATA_API_KEY,
+          apikey: apiKey,
           language: 'en',
           category: cat
         }
@@ -84,7 +93,6 @@ async function fetchNews({ countryCode, category, page, source }) {
         if (source) p.domain = source
         return axios.get('https://newsdata.io/api/1/news', { params: p, timeout: 8000 })
       })
-
       const responses = await Promise.allSettled(requests)
       let allResults = []
       let successCount = 0
@@ -97,10 +105,13 @@ async function fetchNews({ countryCode, category, page, source }) {
           console.warn(`Category Fetch Failed (${catsToFetch[idx]}):`, res.reason.message)
         }
       })
-
       console.log(`Parallel Complete: ${successCount}/${catsToFetch.length} succeeded. Total raw: ${allResults.length}`)
-
+      if (successCount === 0 && responses.length > 0) {
+        const firstError = responses.find(r => r.status === 'rejected')?.reason?.message || 'Unauthorized or network error'
+        return handleError(new Error(firstError), isGlobal, countryCode, { apikey: apiKey })
+      }
       const normalized = normalizeArticles(allResults, isGlobal, countryCode)
+      console.log(`Normalization Complete: ${normalized.length} articles assigned to countries.`)
       return {
         articles:    normalized,
         totalCount:  normalized.length,
@@ -112,37 +123,31 @@ async function fetchNews({ countryCode, category, page, source }) {
       console.error('Parallel Fetch Error:', error.message)
     }
   }
-
   // Standard single fetch (for specific country or specific category)
   const apiKey = process.env.NEWSDATA_API_KEY || process.env.VITE_NEWSDATA_KEY
   const params = {
     apikey: apiKey,
     language: 'en',
   }
-
   if (page && page !== '1' && page !== 1) {
     params.page = page
   }
-
   if (!isGlobal) {
     params.country = countryCode.toLowerCase()
   }
-
   if (category && category !== 'all') {
     params.category = DASHBOARD_TO_API[category] || 'top' 
   } else if (category === 'all') {
     // NewsData API limit is 5 categories per query. 
-    params.category = 'business,politics,technology,top,science'
+    // Prioritize high-impact categories for the fallback
+    params.category = 'top,politics,business,technology,environment,sports'
   }
   
   if (source) params.domain = source
-
   console.log('NewsData Request Params:', { ...params, apikey: '***' })
-
   try {
     const response = await axios.get('https://newsdata.io/api/1/news', { params, timeout: 5000 })
     let normalized = normalizeArticles(response.data.results || [], isGlobal, countryCode)
-
     // CATEGORY ENFORCEMENT:
     // If a specific category was requested (not 'all'), filter out articles
     // that were re-categorized by our keyword refinement logic.
@@ -151,7 +156,6 @@ async function fetchNews({ countryCode, category, page, source }) {
       normalized = normalized.filter(a => a.category === targetCategory)
       console.log(`Category Enforcement: Filtered down to ${normalized.length} articles matching '${targetCategory}'`)
     }
-
     return {
       articles:    normalized,
       totalCount:  response.data.totalResults || 0,
@@ -164,85 +168,90 @@ async function fetchNews({ countryCode, category, page, source }) {
     return handleError(error, isGlobal, countryCode, params)
   }
 }
-
 // Helper to normalize articles
 function normalizeArticles(results, isGlobal, countryCode) {
-  return results.map(article => {
-    const text = `${article.title} ${article.description || ''}`.toLowerCase()
+  const seenLinks = new Set()
+  const normalized = []
+  // Pre-sort countries to check to avoid issues with shorter names matching inside longer ones
+  const countriesToCheck = Object.keys(ISO_TO_NAME).map(iso => ({
+    iso,
+    name: ISO_TO_NAME[iso].toLowerCase(),
+    code: iso.toLowerCase()
+  })).sort((a,b) => b.name.length - a.name.length)
+  for (const article of results) {
+    // 0. Deduplication
+    if (seenLinks.has(article.link)) continue
+    seenLinks.add(article.link)
+    const textRaw = `${article.title} ${article.description || ''}`
+    const textLower = textRaw.toLowerCase()
     
     // 1. DYNAMIC GEOGRAPHY MAPPING (Content-based)
-    // We prioritize content mentions over API source tags to ensure what you see is what you get.
     let code = null
     
-    // Create a list of countries to check (sort by name length descending to catch 'United States' before 'United')
-    const countriesToCheck = Object.keys(ISO_TO_NAME).map(iso => ({
-      iso,
-      name: ISO_TO_NAME[iso].toLowerCase(),
-      code: iso.toLowerCase()
-    })).sort((a,b) => b.name.length - a.name.length)
-
     // Check if we are in a specific country view
     if (!isGlobal && countryCode) {
       const targetISO = countryCode.toUpperCase()
       const target = countriesToCheck.find(c => c.iso === targetISO)
       if (target) {
-        const mentionsTarget = text.includes(target.name) || 
-                               new RegExp(`\\b${target.code}\\b`, 'i').test(text) ||
-                               (target.iso === 'US' && text.includes('usa'))
+        const aliases = COUNTRY_ALIASES[target.iso] || []
+        const aliasMatch = aliases.some(alias => textLower.includes(alias))
+        // Strict matching: Uppercase ISO code (e.g. "IN") OR full name/aliases
+        const mentionsTarget = textLower.includes(target.name) || 
+                               aliasMatch ||
+                               new RegExp(`\\b${target.iso}\\b`).test(textRaw)
         
         if (mentionsTarget) code = target.iso
       }
     } else {
       // Global mode: Find the first country mentioned in the text
       for (const country of countriesToCheck) {
-        const mentionsMatch = text.includes(country.name) || 
-                              new RegExp(`\\b${country.code}\\b`, 'i').test(text) ||
-                              (country.iso === 'US' && text.includes('usa'))
+        const aliases = COUNTRY_ALIASES[country.iso] || []
+        const aliasMatch = aliases.some(alias => textLower.includes(alias.toLowerCase()))
+        
+        const mentionsMatch = textLower.includes(country.name) || 
+                              aliasMatch ||
+                              new RegExp(`\\b${country.iso}\\b`).test(textRaw)
         
         if (mentionsMatch) {
           code = country.iso
           break
         }
       }
-      
-      // Fallback only if global and no country mentioned? 
-      // User said "Just because it's written by an Indian newspaper doesn't mean it should appear in India section".
-      // Let's be strict: if no mention, no marker. This keeps the globe clean.
     }
-
     // 2. CATEGORY REPLENISHMENT & REFINEMENT
     let internalCat = 'society'
     if (article.category && article.category.length > 0) {
       const apiCat = article.category[0].toLowerCase()
       internalCat = CATEGORY_MAP[apiCat] || 'society'
     }
-
     // Tighter conflict keywords using word boundaries
-    const isConflict = /\b(war|warfare|military|air\s*strike|missile|bombing|shelling|insurgency|battles|combat|ceasefire|invasion|attack|strike|soldier|navy|air\s*force|troops|combatants|conflict)\b/i.test(text)
-    const isEconomy = /\b(market|stock\s*exchange|inflation|gdp|fiscal|monetary|central\s*bank|trade\s*deficit|interest\s*rate|revenue|profit|stocks|economy)\b/i.test(text)
-    const isEnvironment = /\b(climate|environment|pollution|emission|renewables|storm|hurricane|cyclone|wildfire|earthquake|flood|weather)\b/i.test(text)
+    const isConflict = /\b(war|warfare|military|air\s*strike|missile|bombing|shelling|insurgency|battles|combat|ceasefire|invasion|attack|strike|soldier|navy|air\s*force|troops|combatants|conflict)\b/i.test(textLower)
+    const isEconomy = /\b(market|stock\s*exchange|inflation|gdp|fiscal|monetary|central\s*bank|trade\s*deficit|interest\s*rate|revenue|profit|stocks|economy)\b/i.test(textLower)
+    const isEnvironment = /\b(climate|environment|pollution|emission|renewables|storm|hurricane|cyclone|wildfire|earthquake|flood|weather)\b/i.test(textLower)
+    const isTech = /\b(startup|software|ai|artificial\s*intelligence|silicon\s*valley|gadget|processor|hardware|encryption|cybersecurity|crypto|blockchain|space\s*x|nasa)\b/i.test(textLower)
     
     if (isConflict) {
       internalCat = 'conflict'
     } else if (isEnvironment) {
       internalCat = 'environment'
+    } else if (isTech) {
+      internalCat = 'technology'
     } else if (isEconomy && (internalCat === 'politics' || internalCat === 'society')) {
       internalCat = 'economy'
     }
-
-    return { ...article, country_code: code, category: internalCat }
-  }).filter(a => a.country_code)
+    if (code) {
+      normalized.push({ ...article, country_code: code, category: internalCat })
+    }
+  }
+  return normalized
 }
-
 function handleError(error, isGlobal, countryCode, params) {
   let message = error.message
   let status = 500
-
   if (error.response) {
     status = error.response.status
     const apiData = error.response.data
     console.error(`NewsData API Error (${status}):`, apiData)
-
     if (status === 429) {
       message = 'NewsData API quota exceeded. Please try again later or check your API key.'
     } else if (status === 401 || status === 403) {
@@ -261,7 +270,6 @@ function handleError(error, isGlobal, countryCode, params) {
     console.error('NewsData API Network Error:', error.message)
     message = 'Network error or timeout reaching NewsData API.'
   }
-
   // Check for placeholder keys
   if (!params.apikey || params.apikey === 'your_newsdata_api_key' || params.apikey.includes('pub_your')) {
     return {
@@ -276,7 +284,6 @@ function handleError(error, isGlobal, countryCode, params) {
       country: "ALL"
     }
   }
-
   // Return a structured error that the frontend can display
   return { 
     error: true, 
@@ -287,5 +294,4 @@ function handleError(error, isGlobal, countryCode, params) {
     country: isGlobal ? 'ALL' : countryCode 
   }
 }
-
 export { fetchNews }
