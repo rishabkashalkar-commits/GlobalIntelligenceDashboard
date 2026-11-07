@@ -3,8 +3,10 @@ import useGlobeStore from '../../store/useGlobeStore'
 
 const ONE_HOUR = 3600000
 const LABELED_COUNT = 6
+const CATEGORY_ORDER = CATEGORIES.map(c => c.id)
 
-// Cache of marker DOM nodes keyed by country code, so layer toggles update in place
+// Cache of marker DOM nodes keyed by `${kind}:${code}:${cat}`, so layer
+// toggles and data merges update in place instead of flickering
 const markerCache = new Map()
 
 export function resetMarkers() {
@@ -27,11 +29,14 @@ export function getCountryName(code) {
   }
 }
 
+// Ring radius (degrees) for a cluster of n category dots around a country
+const clusterRadius = (n) => (n <= 1 ? 0 : 1.2 + 0.45 * n)
+
 export default function MarkerLayer(globe, articles, setTooltip) {
   const { activeLayers } = useGlobeStore.getState()
   const now = Date.now()
 
-  // 1. Aggregate one entry per country (active layers only)
+  // 1. Aggregate per country → per category (active layers only)
   const countries = {}
   articles.forEach(a => {
     if (!a.country_code || !activeLayers.includes(a.category)) return
@@ -40,57 +45,94 @@ export default function MarkerLayer(globe, articles, setTooltip) {
     const lng = a.lng ?? getCountryLng(code)
     if (!lat && !lng) return
 
-    const entry = countries[code] ||= {
-      code, lat, lng, total: 0, counts: {}, isBreaking: false, latest: null,
+    const country = countries[code] ||= { code, lat, lng, total: 0, cats: {} }
+    const cat = country.cats[a.category] ||= {
+      count: 0, isBreaking: false, latest: null, latestTime: -Infinity,
     }
-    entry.total += 1
-    entry.counts[a.category] = (entry.counts[a.category] || 0) + 1
+    country.total += 1
+    cat.count += 1
 
-    const t = new Date(a.pubDate).getTime()
-    if (now - t < ONE_HOUR) entry.isBreaking = true
-    if (!entry.latest || t > entry.latestTime) {
-      entry.latest = a
-      entry.latestTime = t
-    }
-  })
-
-  const markers = Object.values(countries).map(c => {
-    const breakdown = Object.entries(c.counts).sort((a, b) => b[1] - a[1])
-    return {
-      ...c,
-      breakdown,
-      dominant: breakdown[0][0],
-      headline: c.latest?.title || '',
-      size: Math.min(24, 8 + 3.5 * Math.sqrt(c.total)),
+    const t = new Date(a.pubDate).getTime() || 0
+    if (now - t < ONE_HOUR) cat.isBreaking = true
+    if (t > cat.latestTime) {
+      cat.latest = a
+      cat.latestTime = t
     }
   })
 
-  // Top countries by volume get an always-on floating label
+  // 2. Build one dot per (country, category), scattered on a small ring
+  const items = []
+  const countryList = Object.values(countries)
   const labeled = new Set(
-    [...markers].sort((a, b) => b.total - a.total).slice(0, LABELED_COUNT).map(m => m.code)
+    [...countryList].sort((a, b) => b.total - a.total).slice(0, LABELED_COUNT).map(c => c.code)
   )
-  markers.forEach(m => { m.labeled = labeled.has(m.code) })
 
-  // Drop cached elements for countries that no longer have markers
-  const live = new Set(markers.map(m => m.code))
-  for (const code of markerCache.keys()) if (!live.has(code)) markerCache.delete(code)
+  countryList.forEach(c => {
+    const breakdown = Object.entries(c.cats)
+      .map(([cat, d]) => [cat, d.count])
+      .sort((a, b) => b[1] - a[1])
+    // Stable placement: categories keep the same slot regardless of counts
+    const cats = Object.keys(c.cats).sort((a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b))
+    const n = cats.length
+    const r = clusterRadius(n)
+    const lngScale = 1 / Math.max(0.35, Math.cos((c.lat * Math.PI) / 180))
+    const countryBreaking = cats.some(cat => c.cats[cat].isBreaking)
 
-  // 2. Render
+    cats.forEach((cat, i) => {
+      const d = c.cats[cat]
+      const angle = (i / n) * Math.PI * 2 // 0 = north, clockwise
+      items.push({
+        kind: 'dot',
+        key: `dot:${c.code}:${cat}`,
+        code: c.code,
+        category: cat,
+        lat: c.lat + Math.cos(angle) * r,
+        lng: c.lng + Math.sin(angle) * r * lngScale,
+        count: d.count,
+        isBreaking: d.isBreaking,
+        headline: d.latest?.title || '',
+        total: c.total,
+        breakdown,
+        size: Math.min(26, 15 + 2.5 * Math.sqrt(d.count)),
+      })
+    })
+
+    if (labeled.has(c.code)) {
+      items.push({
+        kind: 'label',
+        key: `label:${c.code}`,
+        code: c.code,
+        lat: c.lat + r + 0.8,
+        lng: c.lng,
+        total: c.total,
+        breakdown,
+        isBreaking: countryBreaking,
+        headline: c.cats[breakdown[0][0]].latest?.title || '',
+      })
+    }
+  })
+
+  // Drop cached elements that are no longer rendered
+  const live = new Set(items.map(i => i.key))
+  for (const key of markerCache.keys()) if (!live.has(key)) markerCache.delete(key)
+
+  // 3. Render
   globe
     .pointsData([])
     .ringsData([])
-    .htmlElementsData(markers)
+    .htmlElementsData(items)
     .htmlLat('lat')
     .htmlLng('lng')
-    .htmlAltitude(0.012)
+    .htmlAltitude(d => (d.kind === 'label' ? 0.02 : 0.012))
     .htmlTransitionDuration(0)
     .htmlElement(d => {
-      let el = markerCache.get(d.code)
+      let el = markerCache.get(d.key)
       if (!el) {
-        el = createMarkerEl(globe, setTooltip)
-        markerCache.set(d.code, el)
+        el = d.kind === 'label' ? createLabelEl(setTooltip) : createDotEl(globe, setTooltip)
+        markerCache.set(d.key, el)
       }
-      updateMarkerEl(el, d)
+      if (d.kind === 'label') updateLabelEl(el, d)
+      else updateDotEl(el, d)
       return el
     })
     .htmlElementVisibilityModifier((el, visible) => {
@@ -98,29 +140,21 @@ export default function MarkerLayer(globe, articles, setTooltip) {
     })
 }
 
-function createMarkerEl(globe, setTooltip) {
-  const el = document.createElement('div')
-  el.className = 'gi-marker'
-  el.innerHTML = `
-    <div class="gi-marker__dot">
-      <span class="gi-marker__pulse"></span>
-      <span class="gi-marker__ring"></span>
-      <span class="gi-marker__core"></span>
-    </div>
-    <div class="gi-marker__label">
-      <span class="gi-marker__leader"></span>
-      <div class="gi-marker__card">
-        <div class="gi-marker__country"></div>
-        <div class="gi-marker__meta"></div>
-      </div>
-    </div>
-  `
+function openCountry(code, category = 'all') {
+  const store = useGlobeStore.getState()
+  store.setActiveCategory(category)
+  store.setSelectedCountry(code)
+  store.openPanel()
+}
 
-  const showTooltip = (e) => {
+function bindInteractions(el, setTooltip, onEnter) {
+  const show = (e) => {
     const d = el.__data
     if (!d) return
     setTooltip({
       code: d.code,
+      category: d.category || null,
+      count: d.count ?? d.total,
       total: d.total,
       breakdown: d.breakdown,
       headline: d.headline,
@@ -129,13 +163,12 @@ function createMarkerEl(globe, setTooltip) {
       y: e.clientY,
     })
   }
-
   el.addEventListener('mouseenter', (e) => {
     el.classList.add('is-hover')
-    globe.controls().autoRotate = false
-    showTooltip(e)
+    onEnter?.()
+    show(e)
   })
-  el.addEventListener('mousemove', showTooltip)
+  el.addEventListener('mousemove', show)
   el.addEventListener('mouseleave', () => {
     el.classList.remove('is-hover')
     setTooltip(null)
@@ -144,37 +177,55 @@ function createMarkerEl(globe, setTooltip) {
   el.addEventListener('click', (e) => {
     e.stopPropagation()
     const d = el.__data
-    if (!d) return
-    const store = useGlobeStore.getState()
-    store.setSelectedCountry(d.code)
-    store.openPanel()
+    if (d) openCountry(d.code, d.category || 'all')
   })
+}
 
+function createDotEl(globe, setTooltip) {
+  const el = document.createElement('div')
+  el.className = 'gi-dot'
+  el.innerHTML = `
+    <span class="gi-dot__pulse"></span>
+    <span class="gi-dot__body"><span class="gi-dot__count"></span></span>
+  `
+  bindInteractions(el, setTooltip, () => { globe.controls().autoRotate = false })
   return el
 }
 
-function updateMarkerEl(el, d) {
+function updateDotEl(el, d) {
   el.__data = d
   el.style.setProperty('--size', `${d.size}px`)
-  el.style.setProperty('--c', rgb(d.dominant))
-  el.style.setProperty('--c-soft', rgb(d.dominant, 0.45))
-
-  // Conic ring showing the category mix
-  let acc = 0
-  const stops = d.breakdown.map(([cat, n]) => {
-    const from = (acc / d.total) * 360
-    acc += n
-    const to = (acc / d.total) * 360
-    return `${rgb(cat)} ${from}deg ${to}deg`
-  })
-  el.style.setProperty('--ring', `conic-gradient(${stops.join(', ')})`)
-
+  el.style.setProperty('--c', rgb(d.category))
+  el.style.setProperty('--c-soft', rgb(d.category, 0.45))
   el.classList.toggle('is-breaking', d.isBreaking)
-  el.classList.toggle('is-labeled', d.labeled)
+  el.querySelector('.gi-dot__count').textContent = d.count
+}
 
-  el.querySelector('.gi-marker__country').textContent = getCountryName(d.code)
-  el.querySelector('.gi-marker__meta').textContent =
-    `${d.total} ${d.total === 1 ? 'event' : 'events'} · ${catLabel(d.dominant)}`
+function createLabelEl(setTooltip) {
+  const el = document.createElement('div')
+  el.className = 'gi-label'
+  el.innerHTML = `
+    <span class="gi-label__leader"></span>
+    <div class="gi-label__card">
+      <div class="gi-label__country"></div>
+      <div class="gi-label__total"></div>
+      <div class="gi-label__chips"></div>
+    </div>
+  `
+  bindInteractions(el, setTooltip)
+  return el
+}
+
+function updateLabelEl(el, d) {
+  el.__data = d
+  el.classList.toggle('is-breaking', d.isBreaking)
+  el.querySelector('.gi-label__country').textContent = getCountryName(d.code)
+  el.querySelector('.gi-label__total').textContent =
+    `${d.total} ${d.total === 1 ? 'event' : 'events'}`
+  el.querySelector('.gi-label__chips').innerHTML = d.breakdown
+    .map(([cat, n]) =>
+      `<span class="gi-label__chip" title="${catLabel(cat)}" style="--c:${rgb(cat)}"><i></i>${n}</span>`)
+    .join('')
 }
 
 // Capital city coordinates (kept for lat/lng lookup)

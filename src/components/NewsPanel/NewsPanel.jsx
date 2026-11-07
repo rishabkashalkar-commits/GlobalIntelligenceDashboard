@@ -1,9 +1,9 @@
-import useGlobeStore from '../../store/useGlobeStore'
+import { useMemo } from 'react'
+import useGlobeStore, { articlesForCountry } from '../../store/useGlobeStore'
 import CategoryTabs from './CategoryTabs'
 import PanelFilters from './PanelFilters'
 import ArticleCard from './ArticleCard'
 import WebcamStrip from '../WebcamStrip/WebcamStrip'
-import { useNewsData } from '../../hooks/useNewsData'
 import { useWebcamTrigger } from '../../hooks/useWebcamTrigger'
 import { COUNTRY_FLAGS } from '../../lib/constants'
 
@@ -39,13 +39,26 @@ const ISO_FROM_NAME = {
 export default function NewsPanel() {
   const {
     isPanelOpen, closePanel, selectedCountry,
-    activeCategory, articles, isLoadingNews, newsError, showWebcams
+    activeCategory, articles: pool, isLoadingNews, newsError, showWebcams
   } = useGlobeStore()
 
   // Resolve ISO for flags/regions
   const isoCode = ISO_FROM_NAME[selectedCountry] || (selectedCountry?.length === 2 ? selectedCountry.toUpperCase() : null)
 
-  useWebcamTrigger(articles, selectedCountry)
+  // Same article set the globe markers count, filtered by the active tab
+  const countryArticles = useMemo(
+    () => articlesForCountry(pool, isoCode || selectedCountry),
+    [pool, isoCode, selectedCountry]
+  )
+  const articles = useMemo(
+    () => activeCategory === 'all'
+      ? countryArticles
+      : countryArticles.filter(a => a.category === activeCategory),
+    [countryArticles, activeCategory]
+  )
+  const showSkeleton = isLoadingNews && articles.length === 0
+
+  useWebcamTrigger(countryArticles, selectedCountry)
 
   if (!isPanelOpen) return null
 
@@ -79,11 +92,11 @@ export default function NewsPanel() {
 
       {/* Article List */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
-        {isLoadingNews
+        {showSkeleton
           ? Array(4).fill(0).map((_, i) => (
               <div key={i} className="h-24 bg-surfaceAlt rounded-lg animate-pulse" />
             ))
-          : newsError 
+          : newsError && articles.length === 0
           ? (
             <div className="flex flex-col items-center justify-center pt-12 px-6 text-center">
               <span className="text-2xl mb-3">⚠️</span>
@@ -94,7 +107,7 @@ export default function NewsPanel() {
             </div>
           )
           : articles.map((article, i) => (
-              <ArticleCard key={i} article={article} />
+              <ArticleCard key={article.link || i} article={article} />
             ))
         }
         {!isLoadingNews && !newsError && articles.length === 0 && (

@@ -8,10 +8,10 @@ import { useNewsData } from './hooks/useNewsData'
 const NewsPanel = lazy(() => import('./components/NewsPanel/NewsPanel'))
 
 export default function App() {
-  const { isPanelOpen, selectedCountry, activeCategory } = useGlobeStore()
-  
-  // Fetch news globally on load, then specific to selection
-  useNewsData(selectedCountry, activeCategory)
+  const { isPanelOpen, selectedCountry } = useGlobeStore()
+
+  // Fetch news globally on load, then deepen each selected country
+  useNewsData(selectedCountry)
 
   return (
     <div className="w-screen h-screen bg-base overflow-hidden flex flex-col">

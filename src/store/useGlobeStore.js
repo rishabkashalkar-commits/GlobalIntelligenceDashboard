@@ -22,8 +22,24 @@ const useGlobeStore = create((set) => ({
       : [...state.activeLayers, layer]
   })),
 
+  // Single article pool shared by the globe markers and the news panel.
+  // Every fetch (global or per-country) is merged in, never replaced, so
+  // marker counts and panel lists are always computed from the same data.
   articles:       [],
-  setArticles:    (articles) => set({ articles }),
+  mergeArticles:  (incoming) => set((state) => {
+    const seen = new Set(state.articles.map(articleKey))
+    const fresh = incoming.filter(a => {
+      const k = articleKey(a)
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+    return fresh.length ? { articles: [...state.articles, ...fresh] } : {}
+  }),
+  loadedCountries: {},
+  markCountryLoaded: (code) => set((state) => ({
+    loadedCountries: { ...state.loadedCountries, [code]: true }
+  })),
   isLoadingNews:  false,
   setLoadingNews: (bool) => set({ isLoadingNews: bool }),
   newsError:      null,
@@ -40,5 +56,19 @@ const useGlobeStore = create((set) => ({
   sourceFilter:   'all',
   setSourceFilter: (val) => set({ sourceFilter: val }),
 }))
+
+// Articles for one country, newest first — the same set the globe markers count
+export function articlesForCountry(articles, code) {
+  if (!code) return []
+  const iso = code.toUpperCase()
+  return articles
+    .filter(a => (a.country_code || '').toUpperCase() === iso)
+    .sort((a, b) => new Date(b.pubDate || 0) - new Date(a.pubDate || 0))
+}
+
+// An article can legitimately belong to more than one country
+function articleKey(a) {
+  return `${a.link || a.article_id || a.title}|${(a.country_code || '').toUpperCase()}`
+}
 
 export default useGlobeStore

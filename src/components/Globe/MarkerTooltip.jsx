@@ -6,11 +6,11 @@ const WIDTH = 248
 
 export default function MarkerTooltip({ tooltip }) {
   if (!tooltip) return null
-  const { code, total, breakdown = [], headline, isBreaking, x, y } = tooltip
+  const { code, category, count, total, breakdown = [], headline, isBreaking, x, y } = tooltip
 
   const flipX = x + WIDTH + 24 > window.innerWidth
   const left = flipX ? x - WIDTH - 16 : x + 16
-  const top = Math.max(12, Math.min(y - 24, window.innerHeight - 220))
+  const top = Math.max(12, Math.min(y - 24, window.innerHeight - 300))
 
   return (
     <div
@@ -32,9 +32,19 @@ export default function MarkerTooltip({ tooltip }) {
         )}
       </div>
 
-      <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-textSecondary">
-        {total} {total === 1 ? 'event' : 'events'}
-      </p>
+      {category ? (
+        <p className="mt-1.5 flex items-baseline gap-1.5 font-body text-xs text-textSecondary">
+          <span className="font-mono text-lg font-semibold leading-none" style={{ color: catMeta(category).hex }}>
+            {count}
+          </span>
+          {catMeta(category).label} {count === 1 ? 'event' : 'events'}
+          <span className="ml-auto font-mono text-[10px] text-textMuted">{total} total</span>
+        </p>
+      ) : (
+        <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-textSecondary">
+          {total} {total === 1 ? 'event' : 'events'}
+        </p>
+      )}
 
       {/* Category mix */}
       <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-white/5">
@@ -43,9 +53,12 @@ export default function MarkerTooltip({ tooltip }) {
         ))}
       </div>
       <div className="mt-2 space-y-1">
-        {breakdown.slice(0, 3).map(([cat, n]) => (
-          <div key={cat} className="flex items-center justify-between font-body text-[11px]">
-            <span className="flex items-center gap-1.5 text-textSecondary">
+        {breakdown.map(([cat, n]) => (
+          <div
+            key={cat}
+            className={`flex items-center justify-between font-body text-[11px] rounded px-1 -mx-1 ${cat === category ? 'bg-white/5' : ''}`}
+          >
+            <span className={`flex items-center gap-1.5 ${cat === category ? 'text-textPrimary' : 'text-textSecondary'}`}>
               <span
                 className="h-1.5 w-1.5 rounded-full"
                 style={{ background: catMeta(cat).hex, boxShadow: `0 0 6px ${catMeta(cat).hex}` }}

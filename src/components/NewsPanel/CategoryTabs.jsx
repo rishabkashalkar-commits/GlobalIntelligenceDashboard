@@ -1,8 +1,15 @@
-import { useEffect, useRef } from 'react'
-import useGlobeStore from '../../store/useGlobeStore'
+import { useEffect, useMemo, useRef } from 'react'
+import useGlobeStore, { articlesForCountry } from '../../store/useGlobeStore'
 import { TABS } from '../../lib/constants'
 export default function CategoryTabs() {
-  const { activeCategory, setActiveCategory } = useGlobeStore()
+  const { activeCategory, setActiveCategory, articles, selectedCountry } = useGlobeStore()
+  // Per-tab counts — identical to the numbers on the globe markers
+  const counts = useMemo(() => {
+    const list = articlesForCountry(articles, selectedCountry)
+    const c = { all: list.length }
+    list.forEach(a => { c[a.category] = (c[a.category] || 0) + 1 })
+    return c
+  }, [articles, selectedCountry])
   const scrollRef = useRef(null)
   const tabsRef = useRef({})
   // Auto-scroll the active tab into view
@@ -62,6 +69,9 @@ export default function CategoryTabs() {
                   }`}
               >
                 {label}
+                <span className={`ml-1.5 rounded px-1 py-px text-[9px] ${isActive ? 'bg-white/10 text-textPrimary' : 'bg-white/5 text-textMuted'}`}>
+                  {counts[tab] || 0}
+                </span>
                 {/* Underline for active state */}
                 <div 
                   className={`absolute bottom-0 left-2 right-2 h-[2px] transition-all duration-300 transform rounded-full

@@ -167,6 +167,7 @@ export default function GlobeComponent() {
           .hexPolygonColor(f => f.__color)
           .onHexPolygonClick(f => {
             if (!f?.__code) return
+            useGlobeStore.getState().setActiveCategory('all')
             setSelectedCountry(f.__code)
             openPanel()
           })
