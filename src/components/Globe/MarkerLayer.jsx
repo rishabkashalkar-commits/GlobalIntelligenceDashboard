@@ -1,109 +1,182 @@
 import { CATEGORIES, CATEGORY_COLORS } from '../../lib/constants'
 import useGlobeStore from '../../store/useGlobeStore'
-export default function MarkerLayer(globe, articles, setTooltip) {
-  const { activeLayers, setSelectedCountry, openPanel } = useGlobeStore.getState()
-  const now = Date.now()
-  const ONE_HOUR = 3600000
-  console.log(`MarkerLayer: Processing ${articles.length} articles...`)
-  // 1. Group by country and category
-  const countryData = {}
-  
-  articles.forEach(a => {
-    const lat = a.lat || getCountryLat(a.country_code)
-    const lng = a.lng || getCountryLng(a.country_code)
-    
-    if (!lat && !lng) return // Safety check
-    if (!countryData[a.country_code]) {
-      countryData[a.country_code] = {
-        lat, lng, totalEvents: 0, categories: {}
-      }
-    }
-    
-    const cat = a.category
-    if (!countryData[a.country_code].categories[cat]) {
-      countryData[a.country_code].categories[cat] = {
-        count: 0, isBreaking: false, articles: []
-      }
-    }
-    
-    countryData[a.country_code].categories[cat].count += 1
-    countryData[a.country_code].totalEvents += 1
-    countryData[a.country_code].categories[cat].articles.push(a)
-    
-    if ((now - new Date(a.pubDate).getTime()) < ONE_HOUR) {
-      countryData[a.country_code].categories[cat].isBreaking = true
-    }
-  })
-  // 2. Process data for native globe primitives
-  const pointMarkers = []
-  const ringMarkers = []
-  Object.entries(countryData).forEach(([country_code, data]) => {
-    const activeCats = Object.keys(data.categories).filter(c => activeLayers.includes(c))
-    const numCats = activeCats.length
-    
-    activeCats.forEach((cat, index) => {
-      const catData = data.categories[cat]
-      const angle = numCats > 1 ? (index * (2 * Math.PI) / numCats) : 0
-      const offsetMultiplier = numCats > 1 ? 2.5 : 0
-      
-      const latOffset = Math.cos(angle) * offsetMultiplier
-      const lngOffset = Math.sin(angle) * offsetMultiplier
-      const marker = {
-        country_code,
-        category: cat,
-        lat: data.lat + latOffset,
-        lng: data.lng + lngOffset,
-        radius: catData.isBreaking ? 0.8 : 0.5,
-        color: CATEGORY_COLORS[cat] || [255, 255, 255],
-        articles: catData.articles,
-        count: catData.count,
-        isBreaking: catData.isBreaking
-      }
-      pointMarkers.push(marker)
-      if (marker.isBreaking) {
-        ringMarkers.push(marker)
-      }
-    })
-  })
-  // 3. Apply to Globe using Native Methods
-  // Note: globe.gl methods return the instance for chaining
-  globe
-    .pointsData(pointMarkers)
-    .pointLat('lat')
-    .pointLng('lng')
-    .pointColor(d => `rgba(${d.color[0]}, ${d.color[1]}, ${d.color[2]}, 0.85)`)
-    .pointRadius('radius')
-    .pointAltitude(0.01)
-    .onPointHover((d, event) => {
-      if (d && event) {
-        setTooltip({ 
-          data: { ...d.articles[0], count: d.count, country_code: d.country_code }, 
-          x: event.clientX, 
-          y: event.clientY, 
-          category: d.category,
-          count: d.count
-        })
-      } else {
-        setTooltip(null)
-      }
-    })
-    .onPointClick(d => {
-      if (d) {
-        useGlobeStore.getState().setSelectedCountry(d.country_code)
-        useGlobeStore.getState().openPanel()
-      }
-    })
-  // Add Pulse Rings for breaking news
-  globe
-    .ringsData(ringMarkers)
-    .ringLat('lat')
-    .ringLng('lng')
-    .ringColor(d => `rgba(${d.color[0]}, ${d.color[1]}, ${d.color[2]}, 1)`)
-    .ringMaxRadius(3)
-    .ringPropagationSpeed(2)
-    .ringRepeatPeriod(1000)
-  console.log(`MarkerLayer: Rendered ${pointMarkers.length} points, ${ringMarkers.length} pulse rings.`)
+
+const ONE_HOUR = 3600000
+const LABELED_COUNT = 6
+
+// Cache of marker DOM nodes keyed by country code, so layer toggles update in place
+const markerCache = new Map()
+
+export function resetMarkers() {
+  markerCache.clear()
 }
+
+const rgb = (cat, a = 1) => {
+  const c = CATEGORY_COLORS[cat] || [226, 232, 240]
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`
+}
+
+const catLabel = (cat) => CATEGORIES.find(c => c.id === cat)?.label || cat
+
+export function getCountryName(code) {
+  if (!code) return 'Unknown'
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code.toUpperCase()) || code
+  } catch {
+    return code
+  }
+}
+
+export default function MarkerLayer(globe, articles, setTooltip) {
+  const { activeLayers } = useGlobeStore.getState()
+  const now = Date.now()
+
+  // 1. Aggregate one entry per country (active layers only)
+  const countries = {}
+  articles.forEach(a => {
+    if (!a.country_code || !activeLayers.includes(a.category)) return
+    const code = a.country_code.toUpperCase()
+    const lat = a.lat ?? getCountryLat(code)
+    const lng = a.lng ?? getCountryLng(code)
+    if (!lat && !lng) return
+
+    const entry = countries[code] ||= {
+      code, lat, lng, total: 0, counts: {}, isBreaking: false, latest: null,
+    }
+    entry.total += 1
+    entry.counts[a.category] = (entry.counts[a.category] || 0) + 1
+
+    const t = new Date(a.pubDate).getTime()
+    if (now - t < ONE_HOUR) entry.isBreaking = true
+    if (!entry.latest || t > entry.latestTime) {
+      entry.latest = a
+      entry.latestTime = t
+    }
+  })
+
+  const markers = Object.values(countries).map(c => {
+    const breakdown = Object.entries(c.counts).sort((a, b) => b[1] - a[1])
+    return {
+      ...c,
+      breakdown,
+      dominant: breakdown[0][0],
+      headline: c.latest?.title || '',
+      size: Math.min(24, 8 + 3.5 * Math.sqrt(c.total)),
+    }
+  })
+
+  // Top countries by volume get an always-on floating label
+  const labeled = new Set(
+    [...markers].sort((a, b) => b.total - a.total).slice(0, LABELED_COUNT).map(m => m.code)
+  )
+  markers.forEach(m => { m.labeled = labeled.has(m.code) })
+
+  // Drop cached elements for countries that no longer have markers
+  const live = new Set(markers.map(m => m.code))
+  for (const code of markerCache.keys()) if (!live.has(code)) markerCache.delete(code)
+
+  // 2. Render
+  globe
+    .pointsData([])
+    .ringsData([])
+    .htmlElementsData(markers)
+    .htmlLat('lat')
+    .htmlLng('lng')
+    .htmlAltitude(0.012)
+    .htmlTransitionDuration(0)
+    .htmlElement(d => {
+      let el = markerCache.get(d.code)
+      if (!el) {
+        el = createMarkerEl(globe, setTooltip)
+        markerCache.set(d.code, el)
+      }
+      updateMarkerEl(el, d)
+      return el
+    })
+    .htmlElementVisibilityModifier((el, visible) => {
+      el.classList.toggle('is-hidden', !visible)
+    })
+}
+
+function createMarkerEl(globe, setTooltip) {
+  const el = document.createElement('div')
+  el.className = 'gi-marker'
+  el.innerHTML = `
+    <div class="gi-marker__dot">
+      <span class="gi-marker__pulse"></span>
+      <span class="gi-marker__ring"></span>
+      <span class="gi-marker__core"></span>
+    </div>
+    <div class="gi-marker__label">
+      <span class="gi-marker__leader"></span>
+      <div class="gi-marker__card">
+        <div class="gi-marker__country"></div>
+        <div class="gi-marker__meta"></div>
+      </div>
+    </div>
+  `
+
+  const showTooltip = (e) => {
+    const d = el.__data
+    if (!d) return
+    setTooltip({
+      code: d.code,
+      total: d.total,
+      breakdown: d.breakdown,
+      headline: d.headline,
+      isBreaking: d.isBreaking,
+      x: e.clientX,
+      y: e.clientY,
+    })
+  }
+
+  el.addEventListener('mouseenter', (e) => {
+    el.classList.add('is-hover')
+    globe.controls().autoRotate = false
+    showTooltip(e)
+  })
+  el.addEventListener('mousemove', showTooltip)
+  el.addEventListener('mouseleave', () => {
+    el.classList.remove('is-hover')
+    setTooltip(null)
+  })
+  el.addEventListener('pointerdown', e => e.stopPropagation())
+  el.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const d = el.__data
+    if (!d) return
+    const store = useGlobeStore.getState()
+    store.setSelectedCountry(d.code)
+    store.openPanel()
+  })
+
+  return el
+}
+
+function updateMarkerEl(el, d) {
+  el.__data = d
+  el.style.setProperty('--size', `${d.size}px`)
+  el.style.setProperty('--c', rgb(d.dominant))
+  el.style.setProperty('--c-soft', rgb(d.dominant, 0.45))
+
+  // Conic ring showing the category mix
+  let acc = 0
+  const stops = d.breakdown.map(([cat, n]) => {
+    const from = (acc / d.total) * 360
+    acc += n
+    const to = (acc / d.total) * 360
+    return `${rgb(cat)} ${from}deg ${to}deg`
+  })
+  el.style.setProperty('--ring', `conic-gradient(${stops.join(', ')})`)
+
+  el.classList.toggle('is-breaking', d.isBreaking)
+  el.classList.toggle('is-labeled', d.labeled)
+
+  el.querySelector('.gi-marker__country').textContent = getCountryName(d.code)
+  el.querySelector('.gi-marker__meta').textContent =
+    `${d.total} ${d.total === 1 ? 'event' : 'events'} · ${catLabel(d.dominant)}`
+}
+
 // Capital city coordinates (kept for lat/lng lookup)
 const COUNTRY_COORDS = {
   US: [38.9,  -77.0], GB: [51.5,  -0.1],  FR: [48.9,   2.3],
@@ -125,11 +198,12 @@ const COUNTRY_COORDS = {
   PT: [38.7, -9.1],   NZ: [-41.3, 174.8], SG: [1.3, 103.8],
   MY: [3.1, 101.7],   TH: [13.7, 100.5],  VN: [21.0, 105.8],
 }
-export function getCountryLat(code) { 
+
+export function getCountryLat(code) {
   if (!code) return 0
-  return COUNTRY_COORDS[code.toUpperCase()]?.[0] ?? 0 
+  return COUNTRY_COORDS[code.toUpperCase()]?.[0] ?? 0
 }
-export function getCountryLng(code) { 
+export function getCountryLng(code) {
   if (!code) return 0
-  return COUNTRY_COORDS[code.toUpperCase()]?.[1] ?? 0 
+  return COUNTRY_COORDS[code.toUpperCase()]?.[1] ?? 0
 }
