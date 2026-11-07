@@ -6,7 +6,7 @@ const WIDTH = 248
 
 export default function MarkerTooltip({ tooltip }) {
   if (!tooltip) return null
-  const { code, total, breakdown = [], headline, isBreaking, x, y } = tooltip
+  const { code, total, breakdown = [], isBreaking, x, y } = tooltip
 
   const flipX = x + WIDTH + 24 > window.innerWidth
   const left = flipX ? x - WIDTH - 16 : x + 16
@@ -57,12 +57,7 @@ export default function MarkerTooltip({ tooltip }) {
         ))}
       </div>
 
-      {headline && (
-        <p className="mt-2.5 border-t border-borderSubtle pt-2 font-body text-xs leading-snug text-textPrimary/90 line-clamp-2">
-          {headline}
-        </p>
-      )}
-      <p className="mt-2 font-mono text-[9px] tracking-wider text-accent/70">Click to explore →</p>
+      <p className="mt-2.5 border-t border-borderSubtle pt-2 font-mono text-[9px] tracking-wider text-accent/70">Click to explore →</p>
     </div>
   )
 }

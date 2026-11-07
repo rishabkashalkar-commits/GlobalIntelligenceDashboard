@@ -1,4 +1,4 @@
-import { CATEGORIES, CATEGORY_COLORS } from '../../lib/constants'
+import { CATEGORY_COLORS } from '../../lib/constants'
 import useGlobeStore from '../../store/useGlobeStore'
 
 const ONE_HOUR = 3600000
@@ -16,7 +16,6 @@ const rgb = (cat, a = 1) => {
   return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`
 }
 
-const catLabel = (cat) => CATEGORIES.find(c => c.id === cat)?.label || cat
 
 export function getCountryName(code) {
   if (!code) return 'Unknown'
@@ -175,7 +174,7 @@ function updateMarkerEl(el, d) {
 
   el.querySelector('.gi-marker__country').textContent = getCountryName(d.code)
   el.querySelector('.gi-marker__meta').textContent =
-    `${d.total} ${d.total === 1 ? 'event' : 'events'} · ${catLabel(d.dominant)}`
+    `${d.total} ${d.total === 1 ? 'event' : 'events'}`
 }
 
 // Capital city coordinates (kept for lat/lng lookup)
