@@ -73,9 +73,31 @@ const CATEGORY_MAP = {
   'top': 'politics',
   'other': 'society'
 }
-async function fetchNews({ countryCode, category, page, source }) {
+async function fetchNews({ countryCode, category, page, source, mode }) {
   const isGlobal = !countryCode || countryCode.toLowerCase() === 'all'
-  
+
+  // LITE MODE: one request per country (1 API credit), used to preload
+  // country markers on the globe before the user clicks anything.
+  // Articles from the country's own outlets count for that country too.
+  if (mode === 'lite' && !isGlobal) {
+    const apiKey = process.env.NEWSDATA_API_KEY || process.env.VITE_NEWSDATA_KEY
+    const params = { apikey: apiKey, language: 'en', country: countryCode.toLowerCase() }
+    if (source) params.domain = source
+    try {
+      const response = await axios.get('https://newsdata.io/api/1/news', { params, timeout: 8000 })
+      const normalized = normalizeArticles(response.data.results || [], false, countryCode, { includeSourceCountry: true })
+      return {
+        articles:    normalized,
+        totalCount:  normalized.length,
+        country:     countryCode.toUpperCase(),
+        lastUpdated: new Date().toISOString(),
+        nextPage:    null,
+      }
+    } catch (error) {
+      return handleError(error, false, countryCode, params)
+    }
+  }
+
   // All categories requested? Use parallel fetching to ensure markers for every layer
   if (category === 'all' || !category) {
     const catsToFetch = ['top', 'politics', 'business', 'technology', 'sports', 'science', 'environment', 'world']
@@ -169,7 +191,7 @@ async function fetchNews({ countryCode, category, page, source }) {
   }
 }
 // Helper to normalize articles
-function normalizeArticles(results, isGlobal, countryCode) {
+function normalizeArticles(results, isGlobal, countryCode, { includeSourceCountry = false } = {}) {
   const seenLinks = new Set()
   const normalized = []
   // Pre-sort countries to check to avoid issues with shorter names matching inside longer ones
@@ -200,7 +222,11 @@ function normalizeArticles(results, isGlobal, countryCode) {
                                aliasMatch ||
                                new RegExp(`\\b${target.iso}\\b`).test(textRaw)
         
-        if (mentionsTarget) code = target.iso
+        // Lite mode also accepts stories published by the country's own outlets
+        const fromTargetSource = includeSourceCountry && Array.isArray(article.country) &&
+          article.country.some(n => COUNTRY_NAME_TO_ISO[String(n).toUpperCase()] === target.iso)
+
+        if (mentionsTarget || fromTargetSource) code = target.iso
       }
     } else {
       // Global mode: Find the first country mentioned in the text
